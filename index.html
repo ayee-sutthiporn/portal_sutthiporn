@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ayee_portal</title>
+  <script>
+    (function () {
+      try {
+        const key = "theme";
+        const saved = localStorage.getItem(key);
+        const prefers = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        const dark = saved ? saved === "dark" : prefers;
+        const html = document.documentElement;
+        html.classList.toggle("dark", dark);
+        html.setAttribute("data-theme", dark ? "dark" : "light");
+      } catch { }
+    })();
+  </script>
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
+</html>
