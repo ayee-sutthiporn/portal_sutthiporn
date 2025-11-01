@@ -1,24 +1,12 @@
 pipeline {
-  agent {
-    docker {
-      image 'node:22-alpine'
-      // args '-u root'
-    }
-  }
+  // Use any available agent (no Docker dependency)
+  agent any
 
   options {
     timeout(time: 30, unit: 'MINUTES')
   }
 
   stages {
-    stage('Prepare Environment') {
-      steps {
-        echo '>>> Installing tools inside container (apk add git)'
-        // Ensure git is available for `checkout scm` within the docker agent
-        sh 'apk add --no-cache git'
-      }
-    }
-
     stage('Checkout Code') {
       steps {
         echo '>>> Checking out code from SCM...'
@@ -29,16 +17,28 @@ pipeline {
     stage('Install Dependencies') {
       steps {
         echo '>>> Installing dependencies (npm ci)...'
-        sh 'npm ci'
+        script {
+          if (isUnix()) {
+            sh 'npm ci'
+          } else {
+            bat 'npm ci'
+          }
+        }
       }
     }
 
     stage('Lint and Type Check') {
       steps {
         echo '>>> Running Lint and Type Check...'
-        sh 'npm run lint'
-        // TypeScript type-check using project references
-        sh 'npx tsc -b --pretty false'
+        script {
+          if (isUnix()) {
+            sh 'npm run lint'
+            sh 'npx tsc -b --pretty false'
+          } else {
+            bat 'npm run lint'
+            bat 'npx tsc -b --pretty false'
+          }
+        }
       }
     }
 
@@ -46,7 +46,13 @@ pipeline {
       steps {
         echo '>>> Running Unit Tests (optional)...'
         // Only runs if a test script exists in package.json
-        sh 'npm run --if-present test -- --ci'
+        script {
+          if (isUnix()) {
+            sh 'npm run --if-present test -- --ci'
+          } else {
+            bat 'npm run --if-present test -- --ci'
+          }
+        }
       }
       post {
         success {
@@ -59,7 +65,13 @@ pipeline {
     stage('Build Production') {
       steps {
         echo '>>> Building production bundle (Vite build)...'
-        sh 'npm run build'
+        script {
+          if (isUnix()) {
+            sh 'npm run build'
+          } else {
+            bat 'npm run build'
+          }
+        }
       }
       post {
         success {
@@ -81,4 +93,3 @@ pipeline {
     }
   }
 }
-
