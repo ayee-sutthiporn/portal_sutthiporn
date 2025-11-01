@@ -1,95 +1,101 @@
 pipeline {
-  // Use any available agent (no Docker dependency)
   agent any
 
   options {
     timeout(time: 30, unit: 'MINUTES')
+    skipStagesAfterUnstable()
+  }
+
+  parameters {
+    string(name: 'REGISTRY', defaultValue: 'docker.io', description: 'Docker registry (e.g. docker.io)')
+    string(name: 'IMAGE_REPO', defaultValue: 'your-dockerhub-username/ayee-portal', description: 'Repository (e.g. user/app)')
+    string(name: 'IMAGE_TAG', defaultValue: '', description: 'Optional tag; leave blank to auto')
+    string(name: 'DOCKER_CREDS_ID', defaultValue: 'dockerhub', description: 'Jenkins Credentials ID for registry login')
   }
 
   stages {
-    stage('Checkout Code') {
+    stage('Checkout') {
       steps {
         echo '>>> Checking out code from SCM...'
         checkout scm
       }
     }
 
-    stage('Install Dependencies') {
+    stage('Resolve Tags') {
       steps {
-        echo '>>> Installing dependencies (npm ci)...'
         script {
+          def tag = params.IMAGE_TAG?.trim()
+          if (!tag) {
+            if (env.BUILD_NUMBER) {
+              tag = env.BUILD_NUMBER
+            } else if (env.GIT_COMMIT) {
+              tag = env.GIT_COMMIT.take(7)
+            } else {
+              tag = 'latest'
+            }
+          }
+          env.BUILD_IMAGE = "${params.REGISTRY}/${params.IMAGE_REPO}"
+          env.BUILD_TAG = tag
+          echo ">>> Image: ${env.BUILD_IMAGE}:${env.BUILD_TAG}"
+        }
+      }
+    }
+
+    stage('Docker Build (multi-stage)') {
+      steps {
+        echo '>>> Building Docker image using Dockerfile (multi-stage)...'
+        script {
+          def buildCmd = "docker build -t ${env.BUILD_IMAGE}:${env.BUILD_TAG} -t ${env.BUILD_IMAGE}:latest ."
           if (isUnix()) {
-            sh 'npm ci'
+            sh buildCmd
           } else {
-            bat 'npm ci'
+            bat buildCmd
           }
         }
       }
     }
 
-    stage('Lint and Type Check') {
+    stage('Docker Push') {
       steps {
-        echo '>>> Running Lint and Type Check...'
+        echo '>>> Logging into registry and pushing image...'
         script {
           if (isUnix()) {
-            sh 'npm run lint'
-            sh 'npx tsc -b --pretty false'
+            withCredentials([usernamePassword(credentialsId: params.DOCKER_CREDS_ID, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+              sh """
+                echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin ${params.REGISTRY}
+                docker push ${env.BUILD_IMAGE}:${env.BUILD_TAG}
+                docker push ${env.BUILD_IMAGE}:latest
+              """
+            }
           } else {
-            bat 'npm run lint'
-            bat 'npx tsc -b --pretty false'
+            withCredentials([usernamePassword(credentialsId: params.DOCKER_CREDS_ID, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+              bat """
+                echo %DOCKER_PASS% | docker login -u %DOCKER_USER% --password-stdin ${params.REGISTRY}
+                docker push ${env.BUILD_IMAGE}:${env.BUILD_TAG}
+                docker push ${env.BUILD_IMAGE}:latest
+              """
+            }
           }
         }
       }
     }
 
-    stage('Run Tests') {
-      steps {
-        echo '>>> Running Unit Tests (optional)...'
-        // Only runs if a test script exists in package.json
-        script {
-          if (isUnix()) {
-            sh 'npm run --if-present test -- --ci'
-          } else {
-            bat 'npm run --if-present test -- --ci'
-          }
-        }
-      }
-      post {
-        success {
-          // Publish JUnit reports if present (non-fatal when empty)
-          junit testResults: '**/test-results.xml', allowEmptyResults: true
-        }
-      }
-    }
-
-    stage('Build Production') {
-      steps {
-        echo '>>> Building production bundle (Vite build)...'
-        script {
-          if (isUnix()) {
-            sh 'npm run build'
-          } else {
-            bat 'npm run build'
-          }
-        }
-      }
-      post {
-        success {
-          archiveArtifacts artifacts: 'dist/**', fingerprint: true
-        }
-      }
-    }
+    // Optional deploy stage: enable and customize for your environment
+    // stage('Deploy') {
+    //   when { expression { return false } } // set to true/condition when ready
+    //   steps {
+    //     echo '>>> Deploying container (customize for your infra)...'
+    //     // Example (same host):
+    //     // sh "docker pull ${env.BUILD_IMAGE}:${env.BUILD_TAG} && \
+    //     //     docker rm -f ayee-portal || true && \
+    //     //     docker run -d --name ayee-portal -p 80:80 ${env.BUILD_IMAGE}:${env.BUILD_TAG}"
+    //   }
+    // }
   }
 
   post {
-    always {
-      echo 'Pipeline finished.'
-    }
-    success {
-      echo '✓ Build and checks succeeded.'
-    }
-    failure {
-      echo '✗ Build or checks failed.'
-    }
+    always { echo 'Pipeline finished.' }
+    success { echo '✅ Image built and pushed successfully.' }
+    failure { echo '❌ Pipeline failed.' }
   }
 }
